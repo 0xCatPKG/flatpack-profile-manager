@@ -11,6 +11,9 @@ import subprocess
 # Get the current user's home directory
 home:str = os.path.expanduser("~")
 
+# Exceptions (Some apps in flatpak causes bwrap: failed to create symlink, f.e. Steam)
+exceptions:list[str] = ["com.valvesoftware.Steam"]
+
 # Get the current user's flatpak data directory
 flatpak_data_dir:str = os.path.join(home, ".var", "app")
 
@@ -30,6 +33,9 @@ if len(sys.argv) < 2:
 # Get apps
 def get_apps() -> list[str]:
     apps:list[str] = os.listdir(os.path.join(home, '.local', 'share', 'flatpak', 'app'))
+    for exception in exceptions:
+        if exception in apps:
+            apps.remove(exception)
     return apps
 
 def get_app_profile(app:str) -> str:
@@ -135,6 +141,8 @@ def startcheck():
         # Get current existing app profiles
         app_profiles = os.listdir(flatpak_data_dir)
         for profile in app_profiles:
+            if profile in exceptions:
+                continue
             if os.path.exists(os.path.join(os.path.expanduser("~"), ".config", "flatpak-data-dir-manager", "profiles", profile)):
                 continue
             script_config.write(f"{profile}=default\n")
