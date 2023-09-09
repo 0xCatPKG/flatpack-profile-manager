@@ -1,0 +1,197 @@
+#!/bin/python3
+
+# Manage data dirs for flatpak user installations
+import os
+import sys
+import os.path
+import shutil
+import time
+import subprocess
+
+# Get the current user's home directory
+home:str = os.path.expanduser("~")
+
+# Get the current user's flatpak data directory
+flatpak_data_dir:str = os.path.join(home, ".var", "app")
+
+# Check arguments
+if len(sys.argv) < 2:
+    print(
+        f"Usage: {sys.argv[0]} <command> [args...]\n",
+        "Commands:\n",
+        "  remove-profile <app> - Remove app profile\n",
+        "  new-profile <app> <name> - Create a new flatpak app profile\n",
+        "  choose-profile <app> <name> - Choose a flatpak app profile\n",
+        "  list-profiles <app> - List all profiles for an app\n"
+    )
+    exit(1)
+
+
+# Get apps
+def get_apps() -> list[str]:
+    apps:list[str] = os.listdir(os.path.join(home, '.local', 'share', 'flatpak', 'app'))
+    return apps
+
+def get_app_profile(app:str) -> str:
+    with open(os.path.join(os.path.expanduser("~"), ".config", "flatpak-data-dir-manager", "config"), 'r', encoding="utf-8") as script_config:
+        for line in script_config.readlines():
+            if line.startswith(app):
+                return line.split("=")[1].strip()
+    return ""
+
+# list-profiles for an app
+def list_profiles(app:str):
+
+    # Check if the app exists
+    if app not in get_apps():
+        print(f"Specified app '{app}' does not installed in flatpak")
+        exit(1)
+
+    # Get profiles for app
+    profiles:list[str] = os.listdir(os.path.join(os.path.expanduser("~"), ".config", "flatpak-data-dir-manager", "profiles", app))
+    current_profile:str = get_app_profile(app)
+
+    for profile in profiles:
+        if profile == current_profile:
+            print(profile, "*", sep="")
+        else:
+            print(profile)
+
+# Remove profile for an app
+def remove_profile(app:str, profile:str):
+    if app not in get_apps():
+        print(f"Specified app '{app}' does not installed in flatpak")
+        exit(1)
+
+    if profile not in os.listdir(os.path.join(os.path.expanduser("~"), ".config", "flatpak-data-dir-manager", "profiles", app)):
+        print(f"Specified profile '{profile}' does not exist")
+        exit(1)
+
+    if profile == get_app_profile(app):
+        print("Cannot remove current profile")
+        exit(1)
+
+    # Remove profile
+    shutil.rmtree(os.path.join(os.path.expanduser("~"), ".config", "flatpak-data-dir-manager", "profiles", app, profile))
+
+# Create a new profile for an app
+def new_profile(app:str, profile:str):
+    if app not in get_apps():
+        print(f"Specified app '{app}' does not installed in flatpak")
+        exit(1)
+
+    if profile in os.listdir(os.path.join(os.path.expanduser("~"), ".config", "flatpak-data-dir-manager", "profiles", app)):
+        print(f"Specified profile '{profile}' already exists")
+        exit(1)
+
+    # Create profile
+    os.mkdir(os.path.join(os.path.expanduser("~"), ".config", "flatpak-data-dir-manager", "profiles", app, profile))
+
+# Choose a profile for an app
+def choose_profile(app:str, profile:str):
+    if app not in get_apps():
+        print(f"Specified app '{app}' does not installed in flatpak")
+        exit(1)
+
+    if profile not in os.listdir(os.path.join(os.path.expanduser("~"), ".config", "flatpak-data-dir-manager", "profiles", app)):
+        print(f"Specified profile '{profile}' does not exist")
+        exit(1)
+
+    subprocess.Popen(["/usr/bin/flatpak", "kill", app], stdout = subprocess.PIPE, stderr = subprocess.PIPE).wait()
+
+    # Choose profile
+    with open(os.path.join(os.path.expanduser("~"), ".config", "flatpak-data-dir-manager", "config"), 'r', encoding="utf-8") as script_config:
+        lines:list[str] = script_config.readlines()
+    with open(os.path.join(os.path.expanduser("~"), ".config", "flatpak-data-dir-manager", "config"), 'w', encoding="utf-8") as script_config:
+        for line in lines:
+            if line.startswith(app):
+                script_config.write(f"{app}={profile}\n")
+            else:
+                script_config.write(line)
+
+    os.remove(os.path.join(flatpak_data_dir, app))
+    os.symlink(os.path.join(os.path.expanduser("~"), ".config", "flatpak-data-dir-manager", "profiles", app, profile), os.path.join(flatpak_data_dir, app))
+
+
+# Ensure that current script config exists
+if not os.path.exists(
+    os.path.join(
+        os.path.expanduser("~"), ".config", "flatpak-data-dir-manager"
+    )
+):
+    os.mkdir(
+        os.path.join(
+            os.path.expanduser("~"), ".config", "flatpak-data-dir-manager"
+        )
+    )
+    os.mkdir(
+        os.path.join(
+            os.path.expanduser("~"), ".config", "flatpak-data-dir-manager", "profiles"
+        )
+    )
+
+def startcheck():
+    with open(os.path.join(os.path.expanduser("~"), ".config", "flatpak-data-dir-manager", 'config'), 'a+', encoding="utf-8") as script_config: 
+        # Get current existing app profiles
+        app_profiles = os.listdir(flatpak_data_dir)
+        for profile in app_profiles:
+            if os.path.exists(os.path.join(os.path.expanduser("~"), ".config", "flatpak-data-dir-manager", "profiles", profile)):
+                continue
+            script_config.write(f"{profile}=default\n")
+            os.mkdir(os.path.join(os.path.expanduser("~"), ".config", "flatpak-data-dir-manager", "profiles", profile))
+            shutil.move(os.path.join(flatpak_data_dir, profile), os.path.join(os.path.expanduser("~"), ".config", "flatpak-data-dir-manager", "profiles", profile, "default"))
+            os.symlink(os.path.join(os.path.expanduser("~"), ".config", "flatpak-data-dir-manager", "profiles", profile, "default"), os.path.join(flatpak_data_dir, profile))
+
+startcheck()
+
+command:str = sys.argv[1]
+if command == "list-profiles":
+    if len(sys.argv) < 3:
+        print(f"Usage: {sys.argv[0]} list-profiles <app>")
+        exit(1)
+    elif len(sys.argv) == 3:
+        list_profiles(sys.argv[2])
+    else:
+        print(f"Usage: {sys.argv[0]} list-profiles <app>")
+        exit(1)
+
+elif command == "remove-profile":
+    if len(sys.argv) < 4:
+        print(f"Usage: {sys.argv[0]} remove-profile <app> <profile>")
+        exit(1)
+    elif len(sys.argv) == 4:
+        remove_profile(sys.argv[2], sys.argv[3])
+    else:
+        print(f"Usage: {sys.argv[0]} remove-profile <app> <profile>")
+        exit(1)
+
+elif command == "new-profile":
+    if len(sys.argv) < 4:
+        print(f"Usage: {sys.argv[0]} new-profile <app> <profile>")
+        exit(1)
+    elif len(sys.argv) == 4:
+        new_profile(sys.argv[2], sys.argv[3])
+    else:
+        print(f"Usage: {sys.argv[0]} new-profile <app> <profile>")
+        exit(1)
+
+elif command == "choose-profile":
+    if len(sys.argv) < 4:
+        print(f"Usage: {sys.argv[0]} choose-profile <app> <profile>")
+        exit(1)
+    elif len(sys.argv) == 4:
+        choose_profile(sys.argv[2], sys.argv[3])
+    else:
+        print(f"Usage: {sys.argv[0]} choose-profile <app> <profile>")
+        exit(1)
+
+else:
+    print(
+        f"Usage: {sys.argv[0]} <command> [args...]\n",
+        "Commands:\n",
+        "  remove-profile <app> - Remove app profile\n",
+        "  new-profile <app> <name> - Create a new flatpak app profile\n",
+        "  choose-profile <app> <name> - Choose a flatpak app profile\n",
+        "  list-profiles <app> - List all profiles for an app\n"
+    )
+    exit(1)
